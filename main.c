@@ -1,64 +1,75 @@
+/*
+Version: 0.0.2
+C Standard: C17
+Author: Tilo von Eschwege
+*/
+
 #include <stdio.h>
 #include "E:\res\SDL3\include\SDL3\SDL.h"
 #include "constants.h"
 #include <Math.h>
+#include <stdint.h>
 
 //struct Player
 //{
-//    double x;
-//    double y;
+//    float x;
+//    float y;
 //    int width;
 //    int height;
-//    double speed;
+//    float speed;
 //} player;
 
 struct Ball
 {
-    double x;
-    double y;
-    double speed_x;
-    double speed_y;
-    double accel_x;
-    double accel_y;
+    uint16_t x;
+    uint16_t y;
+    float speed_x;
+    float speed_y;
+    float accel_x;
+    float accel_y;
 
-    int width;
-    int height;
-    double density;
+    uint16_t width;
+    uint16_t height;
+    float density;
+    float mass;
     //int dir_x; //boolean; 1 -> move to the right, 0 -> move to the left
     //int dir_y; //boolean; 1 -> move to the bottom, 0 -> move to the top
 } ball;
 
 struct Ball balls[BALLS];
 
-//struct Player player;
+struct Ball* player = &balls[0];
 
 ////////////////////////////////////////////////////////////////
 //----------------------global variables----------------------//
 ////////////////////////////////////////////////////////////////
-int game_is_running = FALSE;
+uint16_t mouseX = 0;
+uint16_t mouseY = 0;
+
+uint8_t game_is_running = FALSE;
 int last_frame_time = 0;
 
 SDL_Window* window = NULL;
 SDL_Renderer* renderer = NULL;
 
 
-double ball_x0 = 1.0, ball_y0 = 1.0, ball_m0 = 1.0;
-double ball_x1 = 1.0, ball_y1 = 0.0, ball_m1 = 1.0;
-double vx = 1.0, vy = 1.0, length_v = 1.0;
+float ball_x0 = 1.0, ball_y0 = 1.0, ball_m0 = 1.0;
+float ball_x1 = 1.0, ball_y1 = 0.0, ball_m1 = 1.0;
+float vx = 1.0, vy = 1.0, length_v = 1.0;
 
 //used for collision
 int initial_y = 0;
 
-double total_gravitional_force_x = 0.0, total_gravitional_force_y = 0.0;
+float total_gravitional_force_x = 0.0, total_gravitional_force_y = 0.0;
 
 //gravity turns off below this distance
-double min_gravity_action_distance = 20;
+float min_gravity_action_distance = 20;
 
 //should prevent the random slingshot effect of two very close balls
 //F = G * m1 * m2 / (r� * softening_factor�)
-double softening_factor = 50.0;
+float softening_factor = 50.0;
 
-double gravity_vectors[BALLS * 2]; //malloc(sizeof(double) * BALLS * 2); //TODO why is this a static context and why doesn't malloc work here
+float gravity_vectors[BALLS * 2]; //malloc(sizeof(float) * BALLS * 2); //TODO why is this a static context and why doesn't malloc work here
 
 //boolean array that holds all the positions of objects and world borders, the index represents the pixel, where the array saves the pixels row wise.
 // x = i % WINDOW_WIDTH, y = i / WINDOW_WIDTH
@@ -72,19 +83,24 @@ void initialize_balls()
 {
     for (int i = 0; i < BALLS; i++)
     {
-        /*balls[i].x = 50;
-        balls[i].y = 500;*/
         balls[i].speed_x = 0;
         balls[i].speed_y = 0;
         balls[i].accel_x = 0;
         balls[i].accel_y = 0;
 
-        balls[i].width = 50;
-        balls[i].height = 50;
-        balls[i].density = 1.0;
-        balls[i].x = i * 55  % (WINDOW_WIDTH - balls[i].width);
-        balls[i].y = i * 20  % (WINDOW_HEIGHT - balls[i].height);
+        balls[i].width = 20;
+        balls[i].height = 20;
+
+        balls[i].density = 1e5;
+        balls[i].mass = balls[i].density * ((float)(balls[i].width * balls[i].height));
+
+
+        balls[i].x = (i+1) * 505  % (WINDOW_WIDTH - balls[i].width);
+        balls[i].y = (i+1) * 200  % (WINDOW_HEIGHT - balls[i].height);
     }
+
+    player->x = 1000;
+    player->y = 800;
 }
 
 
@@ -94,7 +110,7 @@ void initialize_balls()
 * Handles collision of the balls
 * and the window border.
 ******************************************/
-void update_ball_movement(double delta_time)
+void update_ball_movement(float delta_time)
 {
     for (int i = 0; i < BALLS; i++)
     {
@@ -131,13 +147,13 @@ void apply_gravity()
         total_gravitional_force_y = 0.0;
 
         //the mass of the balls is equal to their surface area, so every ball has the same density of 1
-        ball_m0 = balls[i].density * ((double)(balls[i].width * balls[i].height));
+        ball_m0 = balls[i].mass;
         for (int j = 0; j < BALLS; j++)
         {
             ball_x1 = balls[j].x;
             ball_y1 = balls[j].y;
 
-            ball_m1 = balls[j].density * ((double)(balls[j].width * balls[j].height));
+            ball_m1 = balls[j].mass;
 
             vx = ball_x1 - ball_x0;
             vy = ball_y1 - ball_y0;
@@ -155,8 +171,12 @@ void apply_gravity()
 
         }
 
-        balls[i].accel_x = total_gravitional_force_x / ball_m0; // F = m * a -> a = F / m
-        balls[i].accel_y = total_gravitional_force_y / ball_m0;
+        //don't apply gravity to the player (mouse)
+        if (i != 0) {
+          balls[i].accel_x = total_gravitional_force_x / ball_m0; // F = m * a -> a = F / m
+          balls[i].accel_y = total_gravitional_force_y / ball_m0;
+        }
+
 
     }
 }
@@ -190,7 +210,17 @@ int initialize_window()
         return FALSE;
     }
 
-    renderer = SDL_CreateRenderer(window,"gameWindow");//driver code, display number; -1 -> default
+
+    // int numRenders = SDL_GetNumRenderDrivers();
+    // printf("NumRenderDrivers:%d\n",
+    // numRenders);
+    //
+    // puts("\nAvailable Renders:\n");
+    // for(int i = 0; i < numRenders; i++) {
+    //   printf("%s\n",SDL_GetRenderDriver(i));
+    // }
+
+    renderer = SDL_CreateRenderer(window,"gpu");//driver code, display number; -1 -> default
 
     if (!renderer)
     {
@@ -210,26 +240,54 @@ void process_input()
     SDL_Event event;
     SDL_PollEvent(&event);
 
-    // switch (event.type)
-    // {
-    //     case SDL_QUIT: //window's x button is clicked
-    //         game_is_running = FALSE;
-    //         break;
-    //
-    //     case SDL_KEYDOWN: //keypress
-    //         if (event.key.keysym.sym == SDLK_ESCAPE) //Escape is pressed
-    //         {
-    //             game_is_running = FALSE;
-    //         }
+    switch (event.type)
+    {
+        case SDL_EVENT_QUIT: //window's x button is clicked
+            game_is_running = FALSE;
+            break;
 
 
-            //if (event.key.keysym.scancode == SDL_SCANCODE_W) //Escape is pressed
-            //{
-            //    player.y -= 10;
-            //}
-            //break;
+        case SDL_EVENT_KEY_DOWN: //keypress
+            //measure Scancode, what Key triggered the event?
 
-    //}
+            if (SDL_GetKeyFromScancode(SDLK_ESCAPE ,SDL_KMOD_NONE, 1) ) //Escape is pressed
+            {
+                game_is_running = FALSE;
+                break;
+            }
+
+
+
+            //SDL_GetKeyFromScancode(SDL_SCANCODE_W, SDL_KMOD_NONE, true) == SDLK_W doesn't work and crashes the game
+            if (SDL_GetKeyFromScancode(SDL_SCANCODE_W, SDL_KMOD_NONE, true) == SDLK_W) //Escape is pressed
+            {
+               player->y -= 10;
+            }
+            if (SDL_GetKeyFromScancode(SDL_SCANCODE_S, SDL_KMOD_NONE, true) == SDLK_S) //Escape is pressed
+            {
+               player->y += 10;
+            }
+            if (SDL_GetKeyFromScancode(SDL_SCANCODE_A, SDL_KMOD_NONE, true) == SDLK_A) //Escape is pressed
+            {
+               player->x -= 10;
+            }
+            if (SDL_GetKeyFromScancode(SDL_SCANCODE_D, SDL_KMOD_NONE, true) == SDLK_D) //Escape is pressed
+            {
+               player->x += 10;
+            }
+            break;
+
+        case SDL_EVENT_MOUSE_MOTION:
+            mouseX = (uint16_t)event.motion.x;
+            mouseY = (uint16_t)event.motion.y;
+
+            player->x = mouseX;
+            player->y = mouseY;
+            break;
+
+
+
+    }
 }
 
 
@@ -258,7 +316,7 @@ void update()
     }
 
 
-    double delta_time = (SDL_GetTicks() - last_frame_time) / 1000.0f;
+    float delta_time = (SDL_GetTicks() - last_frame_time) / 1000.0f;
 
     last_frame_time = SDL_GetTicks();
 
@@ -299,7 +357,8 @@ void render()
     int ball_x;
     int ball_y;
 
-    for (int i = 0; i < BALLS; i++) {
+    //start at 1 to not render the player (ball following the mouse)
+    for (int i = 1; i < BALLS; i++) {
 
         //Draw rectangle
         SDL_FRect ball_rect =
