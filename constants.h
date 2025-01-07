@@ -7,6 +7,8 @@
 #define FPS 144
 #define FRAME_TARGET_TIME (1000/FPS)
 
-#define BALLS 5
-
 #define G 2 //actually 6.674e-11, but nothing happens when i plug the correct value in
+
+//gravity
+#define MIN_GRAVITY_ACTION_DISTANCE 20
+#define SOFTENING_FACTOR 50
